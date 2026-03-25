@@ -1,0 +1,19 @@
+{
+  "short_name": "蓝牙键传",
+  "name": "Luo-Link: BlueKey-Trans",
+  "description": "基于蓝牙的内网物理隔离数据摆渡工具",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2097/2097276.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "sender.html",
+  "background_color": "#F2F2F7",
+  "display": "standalone",
+  "theme_color": "#007AFF",
+  "scope": "./",
+  "lang": "zh-CN"
+}
