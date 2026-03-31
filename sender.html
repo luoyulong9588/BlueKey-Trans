@@ -3,99 +3,186 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>S3 全能摆渡发送端</title>
+    <title>S3 发送端</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#007AFF">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2097/2097276.png">
+
     <script src="js/pako.min.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('PWA 注册成功'))
+                    .catch(err => console.log('PWA 注册失败', err));
+            });
+        }
+    </script>
     <style>
-        :root { --blue: #007AFF; --gray: #8e8e93; }
+        :root { --blue: #007AFF; --gray: #8e8e93; --red: #ff3b30; --green: #34c759; }
         body { background: #f2f2f7; font-family: -apple-system, system-ui; margin: 0; display: flex; justify-content: center; padding: 20px; }
         .card { background: rgba(255,255,255,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 28px; padding: 25px; width: 100%; max-width: 420px; box-shadow: 0 12px 40px rgba(0,0,0,0.1); border: 1px solid #fff; }
-        h2 { margin: 0 0 20px; font-size: 22px; text-align: center; }
-        button { background: var(--blue); color: #fff; border: none; padding: 14px; border-radius: 14px; width: 100%; font-weight: 600; margin: 6px 0; transition: 0.2s; -webkit-tap-highlight-color: transparent; }
+        h2 { margin: 0 0 10px; font-size: 22px; text-align: center; }
+
+        #connTag { text-align: center; font-size: 12px; margin-bottom: 15px; color: var(--gray); min-height: 18px; }
+        .connected-text { color: var(--green); font-weight: bold; }
+
+        button { background: var(--blue); color: #fff; border: none; padding: 14px; border-radius: 14px; width: 100%; font-weight: 600; margin: 6px 0; transition: 0.2s; -webkit-tap-highlight-color: transparent; cursor: pointer; }
         button:active { opacity: 0.7; transform: scale(0.98); }
         .tab-group { display: flex; gap: 10px; margin-bottom: 15px; }
         .tab-btn { background: #e5e5ea; color: #000; flex: 1; font-size: 14px; }
         .tab-active { background: var(--blue); color: #fff; }
-        textarea { width: 100%; min-height: 120px; max-height: 350px; border-radius: 14px; border: 1px solid #ddd; padding: 12px; box-sizing: border-box; font-size: 15px; line-height: 1.5; resize: none; overflow-y: auto; transition: height 0.2s; }
-        #st { font-size: 13px; color: var(--gray); text-align: center; margin-top: 12px; }
-        .file-box { border: 2px dashed #ddd; border-radius: 14px; padding: 20px; text-align: center; color: var(--gray); font-size: 14px; }
+        textarea { width: 100%; min-height: 120px; max-height: 350px; border-radius: 14px; border: 1px solid #ddd; padding: 12px; box-sizing: border-box; font-size: 15px; line-height: 1.5; resize: none; overflow-y: auto; transition: height 0.2s; outline: none; }
+
+        #st { font-size: 13px; color: var(--gray); text-align: center; margin-top: 12px; height: 1.2em; }
+
+        .file-box { border: 2px dashed #ddd; border-radius: 14px; padding: 20px; text-align: center; color: var(--gray); font-size: 14px; cursor: pointer; }
+        .btn-clear { background: #f2f2f7; color: var(--red); font-size: 14px; padding: 10px; margin-top: 10px; }
     </style>
 </head>
+
 <body>
 <div class="card">
-    <h2>物理摆渡控制台</h2>
+    <h2>蓝牙键传控制台</h2>
+    <div id="connTag">未连接 S3 设备</div>
+
     <button onclick="connectBLE()" id="cBtn">1. 连接 S3 设备</button>
 
     <div class="tab-group">
-        <button id="b1" class="tab-btn tab-active" onclick="setMode('text')">粘贴文本</button>
+        <button id="b1" class="tab-btn tab-active" onclick="handleTextBtn()">点击粘贴</button>
         <button id="b2" class="tab-btn" onclick="setMode('file')">选择文件</button>
     </div>
 
     <div id="boxText">
         <textarea id="txtIn" placeholder="在此粘贴长篇中文或代码..." oninput="autoH(this)"></textarea>
     </div>
+
     <div id="boxFile" style="display:none">
-        <input type="file" id="fIn" style="display:none" onchange="document.getElementById('fNm').innerText=this.files[0].name">
+        <input type="file" id="fIn" style="display:none" onchange="handleFileSelect(this)">
         <div class="file-box" onclick="document.getElementById('fIn').click()">
             <span id="fNm">点击选择文件 (Max 1MB)</span>
         </div>
     </div>
 
-    <button style="background:#34c759; margin-top:15px;" onclick="doSend()">3. 启动物理注入</button>
-    <div id="st">状态: 等待连接</div>
+    <button class="btn-clear" onclick="clearInput()">清空当前输入</button>
+    <button style="background: var(--green); margin-top:5px;" onclick="doSend()">3. 启动物理注入</button>
+
+    <div id="st">等待操作</div>
 </div>
 
 <script>
-let char, mode = 'text';
-const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const C_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+    let char, connectedDeviceName = "", mode = 'text';
+    const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const C_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-function autoH(e) { e.style.height = 'auto'; e.style.height = e.scrollHeight + 'px'; }
-function setMode(m) {
-    mode = m;
-    document.getElementById('boxText').style.display = m==='text'?'block':'none';
-    document.getElementById('boxFile').style.display = m==='file'?'block':'none';
-    document.getElementById('b1').className = m==='text'?'tab-btn tab-active':'tab-btn';
-    document.getElementById('b2').className = m==='file'?'tab-btn tab-active':'tab-btn';
-}
+    function autoH(e) { e.style.height = 'auto'; e.style.height = e.scrollHeight + 'px'; }
 
-async function connectBLE() {
-    try {
-        const d = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [S_UUID] });
-        const s = await d.gatt.connect();
-        char = await (await s.getPrimaryService(S_UUID)).getCharacteristic(C_UUID);
-        document.getElementById('st').innerText = "✅ 已连接: " + d.name;
-        document.getElementById('cBtn').innerText = "已就绪";
-    } catch (e) { document.getElementById('st').innerText = "❌ 连接失败"; }
-}
-
-async function doSend() {
-    if(!char) return alert("请先连接蓝牙");
-    let u8, name;
-    if(mode === 'text') {
-        u8 = new TextEncoder().encode(document.getElementById('txtIn').value);
-        name = "TEXT_DATA";
-    } else {
-        const f = document.getElementById('fIn').files[0];
-        if(!f) return alert("请选文件");
-        u8 = new Uint8Array(await f.arrayBuffer());
-        name = f.name;
+    // 处理粘贴按钮逻辑
+    async function handleTextBtn() {
+        if (mode !== 'text') {
+            setMode('text');
+        } else {
+            // 如果已经是文本模式，尝试读取剪贴板
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                    const txtArea = document.getElementById('txtIn');
+                    txtArea.value = text;
+                    autoH(txtArea);
+                    showStatus("已从剪贴板粘贴");
+                }
+            } catch (err) {
+                showStatus("❌ 剪贴板权限被拒绝");
+                console.error("无法读取剪贴板: ", err);
+            }
+        }
     }
 
-    const compressed = pako.gzip(u8, { level: 9 });
-    let b = ""; compressed.forEach(y => b += String.fromCharCode(y));
-    const b64 = btoa(b);
-    const pkg = `LUO!|${name}|${b64}#`; // 头|名|数据#
-
-    for (let i = 0; i < pkg.length; i += 20) {
-        await char.writeValue(new TextEncoder().encode(pkg.slice(i, i+20)));
-        document.getElementById('st').innerText = `传输中: ${Math.floor((i/pkg.length)*100)}%`;
-        await new Promise(r => setTimeout(r, 45));
+    function setMode(m) {
+        mode = m;
+        document.getElementById('boxText').style.display = m==='text'?'block':'none';
+        document.getElementById('boxFile').style.display = m==='file'?'block':'none';
+        document.getElementById('b1').className = m==='text'?'tab-btn tab-active':'tab-btn';
+        document.getElementById('b2').className = m==='file'?'tab-btn tab-active':'tab-btn';
+        // 动态修改按钮文字提示
+        document.getElementById('b1').innerText = m==='text' ? "点击粘贴" : "粘贴文本";
     }
-    document.getElementById('st').innerText = "🚀 注入成功！";
-}
+
+    function handleFileSelect(input) {
+        if(input.files.length > 0) {
+            document.getElementById('fNm').innerText = "已选: " + input.files[0].name;
+            document.getElementById('fNm').style.color = "var(--blue)";
+            showStatus("文件已载入");
+        }
+    }
+
+    function showStatus(msg) {
+        document.getElementById('st').innerText = msg;
+    }
+
+    function clearInput() {
+        if (mode === 'text') {
+            const txt = document.getElementById('txtIn');
+            txt.value = "";
+            txt.style.height = '120px';
+        } else {
+            document.getElementById('fIn').value = "";
+            document.getElementById('fNm').innerText = "点击选择文件 (Max 1MB)";
+            document.getElementById('fNm').style.color = "var(--gray)";
+        }
+        showStatus("已清空输入");
+        setTimeout(() => showStatus("等待操作"), 1500);
+    }
+
+    async function connectBLE() {
+        try {
+            const d = await navigator.bluetooth.requestDevice({
+                filters: [{ namePrefix: "Logitech" }],
+                optionalServices: [S_UUID]
+            });
+
+            const s = await d.gatt.connect();
+            char = await (await s.getPrimaryService(S_UUID)).getCharacteristic(C_UUID);
+
+            connectedDeviceName = d.name;
+            const connTag = document.getElementById('connTag');
+            connTag.innerHTML = `✅ 已连接: <span class="connected-text">${connectedDeviceName}</span>`;
+
+            document.getElementById('cBtn').innerText = "重新连接设备";
+            showStatus("设备就绪");
+        } catch (e) {
+            showStatus("❌ 连接失败或取消");
+        }
+    }
+
+    async function doSend() {
+        if(!char) return alert("请先连接蓝牙");
+        let u8, name;
+        if(mode === 'text') {
+            const val = document.getElementById('txtIn').value;
+            if(!val) return alert("请输入内容");
+            u8 = new TextEncoder().encode(val);
+            name = "TEXT_DATA";
+        } else {
+            const f = document.getElementById('fIn').files[0];
+            if(!f) return alert("请选文件");
+            u8 = new Uint8Array(await f.arrayBuffer());
+            name = f.name;
+        }
+
+        showStatus("压缩数据中...");
+        const compressed = pako.gzip(u8, { level: 9 });
+        let b = ""; compressed.forEach(y => b += String.fromCharCode(y));
+        const b64 = btoa(b);
+        const pkg = `LUO!|${name}|${b64}#`;
+
+        for (let i = 0; i < pkg.length; i += 20) {
+            await char.writeValue(new TextEncoder().encode(pkg.slice(i, i+20)));
+            showStatus(`传输中: ${Math.floor((i/pkg.length)*100)}%`);
+            await new Promise(r => setTimeout(r, 45));
+        }
+        showStatus("🚀 注入成功！");
+    }
 </script>
 </body>
 </html>
