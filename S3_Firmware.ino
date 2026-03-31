@@ -24,26 +24,32 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
         String value = pCharacteristic->getValue().c_str();
         if (value.length() > 0) {
-            // 自动环境切换：如果检测到起始包头，先切英文模式
             if (value.indexOf("LUO!") != -1) {
                 Keyboard.press(KEY_LEFT_SHIFT);
                 delay(50);
                 Keyboard.releaseAll();
-                delay(200); // 等待系统反应
+                delay(200);
             }
-
-            // 物理注入数据
             Keyboard.print(value);
         }
     }
 };
 
 void setup() {
+
+
+  // --- 深度模拟罗技 K120 键盘 (关键修改点) ---
+  USB.VID(0x046D);               // Logitech 供应商 ID
+  USB.PID(0xC31C);               // K120 键盘产品 ID
+  USB.productName("Logitech USB Keyboard");
+  USB.manufacturerName("Logitech");
+  USB.serialNumber("LGP920820"); // 模拟一个伪随机序列号
+
   Keyboard.begin();
-  USB.productName("S3-HID-Bridge");
   USB.begin();
 
-  BLEDevice::init("S3-Keyboard-Link");
+  // --- 蓝牙初始化 ---
+  BLEDevice::init("Logitech-BT-Link"); // 建议也改成 Logi-BT-Link
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService *pService = pServer->createService(SERVICE_UUID);
